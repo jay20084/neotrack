@@ -51,14 +51,12 @@ If you want to connect to a live Neo4j database:
 
 ---
 
-## Live Cloud Deployment (Vercel & GitHub Pages)
+## Live Cloud Deployment
 
-### Deploying to Vercel (1-Click)
-1. Go to [vercel.com](https://vercel.com) and sign in with GitHub.
-2. Click **"Add New..."** &rarr; **"Project"**.
-3. Import **`jay20084/neotrack`**.
-4. Leave all default settings (Framework: *Other*, Root Directory: `./`) and click **"Deploy"**.
-5. Your application is live at `https://neotrack-xxxx.vercel.app`!
+### Live on Vercel
+NeoTrack is deployed and publicly accessible on Vercel:
+- **Production URL**: **[https://neotrack-issue3.vercel.app](https://neotrack-issue3.vercel.app)**
+- **Alternative URL**: **[https://neotrack-five.vercel.app](https://neotrack-five.vercel.app)**
 
 ### Deploying to GitHub Pages
 1. Navigate to **`https://github.com/jay20084/neotrack/settings/pages`**.
