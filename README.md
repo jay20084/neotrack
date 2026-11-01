@@ -51,6 +51,23 @@ If you want to connect to a live Neo4j database:
 
 ---
 
+## Live Cloud Deployment (Vercel & GitHub Pages)
+
+### Deploying to Vercel (1-Click)
+1. Go to [vercel.com](https://vercel.com) and sign in with GitHub.
+2. Click **"Add New..."** &rarr; **"Project"**.
+3. Import **`jay20084/neotrack`**.
+4. Leave all default settings (Framework: *Other*, Root Directory: `./`) and click **"Deploy"**.
+5. Your application is live at `https://neotrack-xxxx.vercel.app`!
+
+### Deploying to GitHub Pages
+1. Navigate to **`https://github.com/jay20084/neotrack/settings/pages`**.
+2. Under **Build and deployment** &rarr; **Source**, choose **Deploy from a branch**.
+3. Select branch: **`main`**, folder: **`/ (root)`**, then click **Save**.
+4. The site is published at **`https://jay20084.github.io/neotrack/`**.
+
+---
+
 ## Tech Stack
 - **Backend**: Python 3.10+, FastAPI, Uvicorn, Pydantic, python-dotenv
 - **Frontend**: HTML5, Tailwind CSS, Vis.js Network, Lucide Icons

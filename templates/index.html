@@ -703,12 +703,540 @@
       return s;
     }
 
-    // Initialize icons
-    document.addEventListener("DOMContentLoaded", () => {
+    // Current execution engine (backend API vs. browser client-side engine)
+    let isStaticEngine = false;
+
+    // Helper: current formatted timestamp for tracking logs
+    function getCurrentFormattedTime() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+    }
+
+    // Graph Network Builder for Client-Side Engine
+    function buildClientVisGraph(product, customer, delivery_person, company, branch, origin, dest, events) {
+      const nodes = [];
+      const edges = [];
+      const addedNodes = new Set();
+
+      function addN(nid, label, group, title, colorBg, colorBorder) {
+        if (!addedNodes.has(nid)) {
+          nodes.push({
+            id: nid,
+            label: label,
+            group: group,
+            title: title,
+            color: {
+              background: colorBg,
+              border: colorBorder,
+              highlight: { background: colorBg, border: "#FFFFFF" }
+            },
+            font: { color: "#FFFFFF", size: 13, bold: true },
+            shadow: true
+          });
+          addedNodes.add(nid);
+        }
+      }
+
+      function addE(fromId, toId, label, color = "#94A3B8") {
+        edges.push({
+          from: fromId,
+          to: toId,
+          label: label,
+          arrows: "to",
+          color: { color: color, highlight: "#38BDF8" },
+          font: { size: 10, align: "middle", color: "#CBD5E1" },
+          smooth: { type: "curvedCW", roundness: 0.15 }
+        });
+      }
+
+      const pid = product.product_id;
+      const pNodeId = `prod_${pid}`;
+      addN(
+        pNodeId,
+        `📦 ${product.product_name}\n(#${pid})`,
+        "Product",
+        `Product: ${product.product_name} | Weight: ${product.weight}kg | Status: ${product.current_location}`,
+        "#6366F1", "#4F46E5"
+      );
+
+      if (customer) {
+        const cid = customer.customer_id;
+        const cNodeId = `cust_${cid}`;
+        addN(
+          cNodeId,
+          `👤 ${customer.name}\n(#${cid})`,
+          "Customer",
+          `Customer: ${customer.name} | Phone: ${customer.phone_no || '—'}`,
+          "#3B82F6", "#2563EB"
+        );
+        addE(cNodeId, pNodeId, "ORDERED", "#60A5FA");
+      }
+
+      if (delivery_person) {
+        const dpid = delivery_person.person_id;
+        const dpNodeId = `dp_${dpid}`;
+        addN(
+          dpNodeId,
+          `🚚 ${delivery_person.name}\n(Agent #${dpid})`,
+          "DeliveryPerson",
+          `Courier Agent: ${delivery_person.name} | Phone: ${delivery_person.phone_no || '—'}`,
+          "#F59E0B", "#D97706"
+        );
+        addE(dpNodeId, pNodeId, "ASSIGNED_TO", "#FBBF24");
+      }
+
+      if (company) {
+        const compId = company.company_id;
+        const compNodeId = `comp_${compId}`;
+        addN(
+          compNodeId,
+          `🏢 ${company.name}`,
+          "CourierCompany",
+          `Company: ${company.name} | Email: ${company.email || '—'}`,
+          "#A855F7", "#9333EA"
+        );
+        addE(pNodeId, compNodeId, "SHIPPED_BY", "#C084FC");
+
+        if (branch) {
+          const bid = branch.branch_id;
+          const bNodeId = `branch_${bid}`;
+          addN(
+            bNodeId,
+            `🏛️ ${branch.branch_name}`,
+            "Branch",
+            `Hub: ${branch.branch_name} | Address: ${branch.branch_address || '—'}`,
+            "#14B8A6", "#0D9488"
+          );
+          addE(compNodeId, bNodeId, "LOCATED_AT", "#2DD4BF");
+        }
+      }
+
+      if (origin) {
+        const origId = origin.address_id || 'orig';
+        const origNodeId = `addr_${origId}_orig`;
+        addN(
+          origNodeId,
+          `📍 Origin\n${origin.city || ''}`,
+          "Address",
+          `From: ${origin.house_no || ''}, ${origin.street || ''}, ${origin.city || ''}`,
+          "#10B981", "#059669"
+        );
+        addE(pNodeId, origNodeId, "ORIGINATED_AT", "#34D399");
+      }
+
+      if (dest) {
+        const destId = dest.address_id || 'dest';
+        const destNodeId = `addr_${destId}_dest`;
+        addN(
+          destNodeId,
+          `🎯 Destination\n${dest.city || ''}`,
+          "Address",
+          `To: ${dest.house_no || ''}, ${dest.street || ''}, ${dest.city || ''}`,
+          "#059669", "#047857"
+        );
+        addE(pNodeId, destNodeId, "DESTINED_FOR", "#10B981");
+      }
+
+      if (Array.isArray(events)) {
+        events.forEach(ev => {
+          const tid = ev.tracking_id;
+          const tNodeId = `track_${tid}`;
+          addN(
+            tNodeId,
+            `⏱️ ${ev.arrival_status}\n${ev.arrival_time}`,
+            "TrackingEvent",
+            `Event #${tid}: ${ev.arrival_status} at ${ev.arrival_time}`,
+            "#F43F5E", "#E11D48"
+          );
+          addE(pNodeId, tNodeId, "HAS_TRACKING_EVENT", "#FB7185");
+        });
+      }
+
+      return { nodes, edges };
+    }
+
+    // Client-side in-memory & localStorage graph database engine
+    const ClientDB = {
+      KEY: "neotrack_client_db_v1",
+
+      load() {
+        try {
+          const raw = localStorage.getItem(this.KEY);
+          if (raw) return JSON.parse(raw);
+        } catch (e) {
+          console.warn("localStorage not accessible, using memory", e);
+        }
+        return this.defaultState();
+      },
+
+      save(data) {
+        try {
+          localStorage.setItem(this.KEY, JSON.stringify(data));
+        } catch (e) {
+          console.warn("Failed to persist to localStorage", e);
+        }
+      },
+
+      defaultState() {
+        return {
+          branches: {
+            101: { branch_id: 101, branch_name: "Chennai Main Hub", branch_address: "Guindy, Chennai" },
+            102: { branch_id: 102, branch_name: "Bangalore Tech Hub", branch_address: "Electronic City, Bangalore" }
+          },
+          companies: {
+            1: { company_id: 1, name: "FastTrack Logistics", phone_no: "9876543210", email: "contact@fasttrack.com", branch_id: 101 },
+            2: { company_id: 2, name: "Swift Parcel Co", phone_no: "9876543211", email: "support@swiftparcel.com", branch_id: 102 }
+          },
+          delivery_persons: {
+            201: { person_id: 201, name: "Ramesh Kumar", phone_no: "9988776655", company_id: 1 },
+            202: { person_id: 202, name: "Suresh Reddy", phone_no: "9988776644", company_id: 2 }
+          },
+          customers: {},
+          addresses: {},
+          products: {},
+          tracking_events: {},
+          next_tracking_id: 9001
+        };
+      },
+
+      clear() {
+        const state = this.defaultState();
+        this.save(state);
+        return state;
+      },
+
+      seedSampleData() {
+        const state = {
+          branches: {
+            101: { branch_id: 101, branch_name: "Chennai Main Hub", branch_address: "Guindy, Chennai" },
+            102: { branch_id: 102, branch_name: "Bangalore Tech Hub", branch_address: "Electronic City, Bangalore" }
+          },
+          companies: {
+            1: { company_id: 1, name: "FastTrack Logistics", phone_no: "9876543210", email: "contact@fasttrack.com", branch_id: 101 },
+            2: { company_id: 2, name: "Swift Parcel Co", phone_no: "9876543211", email: "support@swiftparcel.com", branch_id: 102 }
+          },
+          delivery_persons: {
+            201: { person_id: 201, name: "Ramesh Kumar", phone_no: "9988776655", company_id: 1 },
+            202: { person_id: 202, name: "Suresh Reddy", phone_no: "9988776644", company_id: 2 }
+          },
+          customers: {
+            501: { customer_id: 501, name: "Adhithya V", phone_no: "9123456780" },
+            502: { customer_id: 502, name: "Vishnuvardhan G", phone_no: "9123456781" },
+            503: { customer_id: 503, name: "Jayesh R", phone_no: "9123456782" }
+          },
+          addresses: {
+            301: { address_id: 301, house_no: "4A", street: "Gandhi St", city: "Chennai" },
+            302: { address_id: 302, house_no: "12B", street: "MG Road", city: "Bangalore" },
+            303: { address_id: 303, house_no: "10", street: "Lake View", city: "Coimbatore" },
+            304: { address_id: 304, house_no: "88", street: "Park Ave", city: "Chennai" }
+          },
+          products: {
+            1001: {
+              product_id: 1001,
+              product_name: "Laptop",
+              product_type: "Electronics",
+              product_size: "Medium",
+              weight: 2.50,
+              current_location: "Bangalore Hub",
+              expected_delivery: "+1 day",
+              company_id: 1,
+              customer_id: 501,
+              delivery_person_id: 201,
+              origin_address_id: 301,
+              dest_address_id: 302,
+              tracking_ids: [9001, 9002]
+            },
+            1002: {
+              product_id: 1002,
+              product_name: "Legal Documents",
+              product_type: "Paper",
+              product_size: "Small",
+              weight: 0.20,
+              current_location: "Chennai Sorting Center",
+              expected_delivery: "Today",
+              company_id: 1,
+              customer_id: 502,
+              delivery_person_id: 202,
+              origin_address_id: 303,
+              dest_address_id: 304,
+              tracking_ids: [9003]
+            },
+            1003: {
+              product_id: 1003,
+              product_name: "Gaming Monitor",
+              product_type: "Electronics",
+              product_size: "Large",
+              weight: 6.80,
+              current_location: "Delivered - Customer Doorstep",
+              expected_delivery: "Delivered",
+              company_id: 2,
+              customer_id: 503,
+              delivery_person_id: 202,
+              origin_address_id: 302,
+              dest_address_id: 301,
+              tracking_ids: [9004, 9005, 9006]
+            }
+          },
+          tracking_events: {
+            9001: { tracking_id: 9001, arrival_time: "2026-11-01 09:30", arrival_status: "Dispatched to Facility" },
+            9002: { tracking_id: 9002, arrival_time: "2026-11-01 14:15", arrival_status: "In Transit" },
+            9003: { tracking_id: 9003, arrival_time: "2026-11-01 11:00", arrival_status: "Sorting at Facility" },
+            9004: { tracking_id: 9004, arrival_time: "2026-11-01 08:00", arrival_status: "Dispatched to Facility" },
+            9005: { tracking_id: 9005, arrival_time: "2026-11-01 12:45", arrival_status: "Out for Delivery" },
+            9006: { tracking_id: 9006, arrival_time: "2026-11-01 16:30", arrival_status: "Delivered" }
+          },
+          next_tracking_id: 9007
+        };
+        this.save(state);
+        return state;
+      },
+
+      getAllShipments() {
+        const db = this.load();
+        const rows = [];
+        Object.values(db.products || {}).forEach(p => {
+          const cust = (db.customers || {})[p.customer_id] || {};
+          const dp = (db.delivery_persons || {})[p.delivery_person_id] || {};
+          const comp = (db.companies || {})[p.company_id] || {};
+          const branch = comp.branch_id ? (db.branches || {})[comp.branch_id] || {} : {};
+          const orig = (db.addresses || {})[p.origin_address_id] || {};
+          const dest = (db.addresses || {})[p.dest_address_id] || {};
+
+          rows.push({
+            product_id: p.product_id,
+            product_name: p.product_name,
+            product_type: p.product_type || "General",
+            weight: Number(p.weight || 0),
+            company_name: comp.name || "FastTrack Logistics",
+            branch_name: branch.branch_name || "Chennai Main Hub",
+            customer_name: cust.name || "Unassigned",
+            customer_phone: cust.phone_no || "",
+            delivery_person: dp.name || "Unassigned",
+            delivery_person_id: dp.person_id || null,
+            location: p.current_location,
+            current_location: p.current_location,
+            expected_delivery: formatExpectedDelivery(p.expected_delivery),
+            sender_city: orig.city || "Chennai",
+            sender_address: `${orig.house_no || ''} ${orig.street || ''}`.trim(),
+            receiver_city: dest.city || "Bangalore",
+            receiver_address: `${dest.house_no || ''} ${dest.street || ''}`.trim()
+          });
+        });
+        return rows.sort((a, b) => a.product_id - b.product_id);
+      },
+
+      getAnalytics() {
+        const db = this.load();
+        const prods = Object.values(db.products || {});
+        const totalActive = prods.length;
+        const totalWeight = prods.reduce((sum, p) => sum + Number(p.weight || 0), 0);
+        const overallAvg = totalActive > 0 ? Number((totalWeight / totalActive).toFixed(2)) : 0.0;
+
+        const companies = [];
+        Object.values(db.companies || {}).forEach(c => {
+          const cProds = prods.filter(p => p.company_id === c.company_id);
+          const cTotalW = cProds.reduce((sum, p) => sum + Number(p.weight || 0), 0);
+          const cAvg = cProds.length > 0 ? Number((cTotalW / cProds.length).toFixed(2)) : 0.0;
+          companies.push({
+            company_id: c.company_id,
+            company_name: c.name,
+            package_count: cProds.length,
+            avg_weight: cAvg
+          });
+        });
+
+        return {
+          total_active_shipments: totalActive,
+          overall_avg_weight: overallAvg,
+          companies: companies
+        };
+      },
+
+      trackProduct(productId) {
+        const db = this.load();
+        const p = (db.products || {})[productId];
+        if (!p) throw new Error(`Product #${productId} not found.`);
+
+        const cust = (db.customers || {})[p.customer_id] || null;
+        const dp = (db.delivery_persons || {})[p.delivery_person_id] || null;
+        const comp = (db.companies || {})[p.company_id] || null;
+        const branch = comp && comp.branch_id ? (db.branches || {})[comp.branch_id] || null : null;
+        const orig = (db.addresses || {})[p.origin_address_id] || null;
+        const dest = (db.addresses || {})[p.dest_address_id] || null;
+
+        const events = (p.tracking_ids || []).map(tid => {
+          return (db.tracking_events || {})[tid] || null;
+        }).filter(Boolean);
+
+        events.sort((a, b) => a.tracking_id - b.tracking_id);
+
+        const graphData = buildClientVisGraph(p, cust, dp, comp, branch, orig, dest, events);
+
+        return {
+          product: p,
+          customer: cust,
+          delivery_person: dp,
+          company: comp,
+          branch: branch,
+          origin: orig,
+          dest: dest,
+          tracking_events: events,
+          graph_data: graphData
+        };
+      },
+
+      createShipment(payload) {
+        const db = this.load();
+
+        let pid = payload.product_id;
+        if (!pid) {
+          const existingIds = Object.keys(db.products || {}).map(Number);
+          pid = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1001;
+        }
+
+        const custId = 500 + Object.keys(db.customers || {}).length + 1;
+        db.customers = db.customers || {};
+        db.customers[custId] = {
+          customer_id: custId,
+          name: payload.customer_name || "Guest Customer",
+          phone_no: payload.customer_phone || "9000000000"
+        };
+
+        const origId = 300 + (Object.keys(db.addresses || {}).length * 2) + 1;
+        const destId = origId + 1;
+        db.addresses = db.addresses || {};
+        db.addresses[origId] = {
+          address_id: origId,
+          house_no: "101",
+          street: payload.origin_street || "Main Road",
+          city: payload.origin_city || "Chennai"
+        };
+        db.addresses[destId] = {
+          address_id: destId,
+          house_no: "202",
+          street: payload.dest_street || "Express Way",
+          city: payload.dest_city || "Bangalore"
+        };
+
+        let dpId = payload.delivery_person_id;
+        if (!dpId && payload.delivery_person_name) {
+          const existing = Object.values(db.delivery_persons || {}).find(
+            d => d.name.toLowerCase() === payload.delivery_person_name.toLowerCase()
+          );
+          if (existing) {
+            dpId = existing.person_id;
+          } else {
+            dpId = 200 + Object.keys(db.delivery_persons || {}).length + 1;
+            db.delivery_persons = db.delivery_persons || {};
+            db.delivery_persons[dpId] = {
+              person_id: dpId,
+              name: payload.delivery_person_name,
+              phone_no: "9800000000",
+              company_id: payload.company_id || 1
+            };
+          }
+        }
+        if (!dpId) dpId = 201;
+
+        const tid = db.next_tracking_id || 9001;
+        db.next_tracking_id = tid + 1;
+        db.tracking_events = db.tracking_events || {};
+        db.tracking_events[tid] = {
+          tracking_id: tid,
+          arrival_time: getCurrentFormattedTime(),
+          arrival_status: payload.initial_status || "Dispatched to Facility"
+        };
+
+        db.products = db.products || {};
+        db.products[pid] = {
+          product_id: pid,
+          product_name: payload.product_name,
+          product_type: payload.product_type || "General",
+          product_size: payload.product_size || "Medium",
+          weight: parseFloat(payload.weight || 1.0),
+          current_location: payload.current_location || "Origin Facility",
+          expected_delivery: formatExpectedDelivery(payload.expected_delivery),
+          company_id: payload.company_id || 1,
+          customer_id: custId,
+          delivery_person_id: dpId,
+          origin_address_id: origId,
+          dest_address_id: destId,
+          tracking_ids: [tid]
+        };
+
+        this.save(db);
+        return {
+          status: "success",
+          product_id: pid,
+          message: `Shipment #${pid} successfully created!`
+        };
+      },
+
+      updateStatus(payload) {
+        const db = this.load();
+        const pid = payload.product_id;
+        const p = (db.products || {})[pid];
+        if (!p) throw new Error(`Product #${pid} not found.`);
+
+        p.current_location = payload.new_location;
+
+        const statLower = String(payload.new_status).toLowerCase();
+        const days = parseInt(payload.days_to_add || 0);
+
+        if (statLower === "delivered" || days < 0) {
+          p.expected_delivery = "Delivered";
+        } else if (days === 0) {
+          p.expected_delivery = "Today";
+        } else {
+          p.expected_delivery = `+${days} days`;
+        }
+
+        const tid = db.next_tracking_id || 9001;
+        db.next_tracking_id = tid + 1;
+        db.tracking_events = db.tracking_events || {};
+        db.tracking_events[tid] = {
+          tracking_id: tid,
+          arrival_time: getCurrentFormattedTime(),
+          arrival_status: payload.new_status
+        };
+        p.tracking_ids = p.tracking_ids || [];
+        p.tracking_ids.push(tid);
+
+        this.save(db);
+        return {
+          status: "success",
+          product_id: pid,
+          new_location: p.current_location,
+          new_status: payload.new_status,
+          expected_delivery: p.expected_delivery,
+          message: `Successfully updated Product #${pid}! Timeline and graph synchronized.`
+        };
+      },
+
+      getHubProducts(branchName) {
+        const all = this.getAllShipments();
+        if (!branchName || branchName === "All") return all;
+        return all.filter(s => {
+          const b = (s.branch_name || "").toLowerCase();
+          const o = (s.sender_city || "").toLowerCase();
+          const r = (s.receiver_city || "").toLowerCase();
+          const query = branchName.toLowerCase();
+          return b.includes(query) || o.includes(query) || r.includes(query);
+        });
+      }
+    };
+
+    // Initialize icons and startup sequence
+    document.addEventListener("DOMContentLoaded", async () => {
       lucide.createIcons();
-      checkConnectionStatus();
-      loadAnalytics();
-      loadAllShipments();
+      await checkConnectionStatus();
+      await loadAnalytics();
+      await loadAllShipments();
     });
 
     // Toast notification utility
@@ -744,12 +1272,28 @@
 
     // Check backend and DB status
     async function checkConnectionStatus() {
+      const badge = document.getElementById("db-badge");
+      const dot = document.getElementById("db-dot");
+      const label = document.getElementById("db-label");
+
+      // Auto-detect GitHub Pages, Vercel static deployment, or local file protocol
+      const isStaticHost = window.location.hostname.endsWith('github.io') ||
+                           window.location.hostname.endsWith('vercel.app') ||
+                           window.location.protocol === 'file:';
+
+      if (isStaticHost) {
+        isStaticEngine = true;
+        badge.className = "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-emerald-500/10 border-emerald-500/30 text-emerald-400";
+        dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50";
+        label.textContent = window.location.hostname.endsWith('vercel.app') ? "Live (Vercel)" : "Static Mode (Live Engine)";
+        return;
+      }
+
       try {
         const res = await fetch("/api/status/connection");
+        if (!res.ok) throw new Error("API status " + res.status);
         const data = await res.json();
-        const badge = document.getElementById("db-badge");
-        const dot = document.getElementById("db-dot");
-        const label = document.getElementById("db-label");
+        isStaticEngine = false;
 
         if (data.connected) {
           badge.className = "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-emerald-500/10 border-emerald-500/30 text-emerald-400";
@@ -761,7 +1305,11 @@
           label.textContent = "Mock Graph Engine (Active)";
         }
       } catch (err) {
-        document.getElementById("db-label").textContent = "API Offline";
+        // Fallback to client graph engine
+        isStaticEngine = true;
+        badge.className = "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-indigo-500/10 border-indigo-500/30 text-indigo-400";
+        dot.className = "w-2.5 h-2.5 rounded-full bg-indigo-400 shadow-sm shadow-indigo-400/50";
+        label.textContent = "Client Graph Engine (Active)";
       }
     }
 
@@ -773,14 +1321,19 @@
       lucide.createIcons();
 
       try {
-        const res = await fetch("/api/clear", { method: "POST" });
-        const data = await res.json();
-        showToast(data.message || "Database reset clean (0 records).", "success");
+        if (isStaticEngine) {
+          ClientDB.clear();
+          showToast("Database reset clean (0 records).", "success");
+        } else {
+          const res = await fetch("/api/clear", { method: "POST" });
+          const data = await res.json();
+          showToast(data.message || "Database reset clean (0 records).", "success");
+        }
         currentProductId = null;
-        checkConnectionStatus();
-        loadAnalytics();
-        loadAllShipments();
-        loadProductTracking(null);
+        await checkConnectionStatus();
+        await loadAnalytics();
+        await loadAllShipments();
+        await loadProductTracking(null);
       } catch (err) {
         showToast("Failed to reset database: " + err.message, "error");
       } finally {
@@ -789,11 +1342,35 @@
       }
     }
 
+    // Seed sample demo data on demand
+    async function seedDemoShipments() {
+      if (isStaticEngine) {
+        ClientDB.seedSampleData();
+        showToast("Sample shipments loaded!", "success");
+        await loadAllShipments();
+        await loadAnalytics();
+      } else {
+        try {
+          const res = await fetch("/api/reset", { method: "POST" });
+          showToast("Sample shipments loaded from seed!", "success");
+          await loadAllShipments();
+          await loadAnalytics();
+        } catch (e) {
+          showToast("Could not load sample data: " + e.message, "error");
+        }
+      }
+    }
+
     // Load Analytics (Strictly computed from inserted database records)
     async function loadAnalytics() {
       try {
-        const res = await fetch("/api/analytics");
-        const data = await res.json();
+        let data;
+        if (isStaticEngine) {
+          data = ClientDB.getAnalytics();
+        } else {
+          const res = await fetch("/api/analytics");
+          data = await res.json();
+        }
 
         const totalShipments = data.total_active_shipments || 0;
         const overallAvg = data.overall_avg_weight !== undefined ? Number(data.overall_avg_weight).toFixed(2) : "0.00";
@@ -829,8 +1406,12 @@
     // Load All Active Shipments Table
     async function loadAllShipments() {
       try {
-        const res = await fetch("/api/shipments");
-        allShipmentsData = await res.json();
+        if (isStaticEngine) {
+          allShipmentsData = ClientDB.getAllShipments();
+        } else {
+          const res = await fetch("/api/shipments");
+          allShipmentsData = await res.json();
+        }
         renderShipmentsTable(allShipmentsData);
         updateProductDropdown(allShipmentsData);
         updateAgentSuggestions(allShipmentsData);
@@ -905,8 +1486,13 @@
         renderShipmentsTable(allShipmentsData);
       } else {
         try {
-          const res = await fetch(`/api/hub-products/${encodeURIComponent(hub)}`);
-          const hubProducts = await res.json();
+          let hubProducts;
+          if (isStaticEngine) {
+            hubProducts = ClientDB.getHubProducts(hub);
+          } else {
+            const res = await fetch(`/api/hub-products/${encodeURIComponent(hub)}`);
+            hubProducts = await res.json();
+          }
           renderShipmentsTable(hubProducts);
         } catch (err) {
           showToast("Error filtering by hub: " + err.message, "error");
@@ -924,7 +1510,14 @@
           <div class="flex flex-col items-center justify-center gap-2">
             <i data-lucide="package-search" class="w-8 h-8 text-slate-600"></i>
             <span class="text-sm font-medium text-slate-400">No shipments found in database</span>
-            <span class="text-xs text-slate-500">Click <strong class="text-emerald-400">+ Insert New Shipment</strong> above to create your first record!</span>
+            <div class="flex items-center gap-2 mt-2">
+              <button onclick="openNewShipmentModal()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-sm">
+                + Insert New Shipment
+              </button>
+              <button onclick="seedDemoShipments()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition shadow-sm">
+                Load Sample Data
+              </button>
+            </div>
           </div>
         </td></tr>`;
         lucide.createIcons();
@@ -1027,12 +1620,17 @@
       loader.classList.remove("hidden");
 
       try {
-        const res = await fetch(`/api/track/${productId}`);
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || "Product not found.");
+        let data;
+        if (isStaticEngine) {
+          data = ClientDB.trackProduct(productId);
+        } else {
+          const res = await fetch(`/api/track/${productId}`);
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || "Product not found.");
+          }
+          data = await res.json();
         }
-        const data = await res.json();
         
         // 1. Populate Metadata
         const p = data.product;
@@ -1312,15 +1910,20 @@
       };
 
       try {
-        const res = await fetch("/api/status/update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+        let data;
+        if (isStaticEngine) {
+          data = ClientDB.updateStatus(payload);
+        } else {
+          const res = await fetch("/api/status/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
 
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.detail || "Failed to update status.");
+          data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.detail || "Failed to update status.");
+          }
         }
 
         showToast(data.message || "Status updated successfully!", "success");
@@ -1408,15 +2011,20 @@
       };
 
       try {
-        const res = await fetch("/api/shipment/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+        let data;
+        if (isStaticEngine) {
+          data = ClientDB.createShipment(payload);
+        } else {
+          const res = await fetch("/api/shipment/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
 
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.detail || "Failed to insert new shipment.");
+          data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.detail || "Failed to insert new shipment.");
+          }
         }
 
         showToast(data.message || "New shipment inserted into Graph DB!", "success");

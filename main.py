@@ -1203,10 +1203,13 @@ def get_hub_products(branch_name: str):
 # -----------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request = None):
-    index_file = BASE_DIR / "templates" / "index.html"
-    if not index_file.exists():
-        raise HTTPException(status_code=404, detail="index.html not found.")
-    return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+    root_index = BASE_DIR / "index.html"
+    if root_index.exists():
+        return HTMLResponse(content=root_index.read_text(encoding="utf-8"))
+    templates_index = BASE_DIR / "templates" / "index.html"
+    if templates_index.exists():
+        return HTMLResponse(content=templates_index.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="index.html not found.")
 
 if __name__ == "__main__":
     import uvicorn
