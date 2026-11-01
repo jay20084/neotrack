@@ -18,8 +18,8 @@ A modern Courier Tracking and Logistics Management web application built with **
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/<YOUR-USERNAME>/<YOUR-REPO-NAME>.git
-cd <YOUR-REPO-NAME>
+git clone https://github.com/jay20084/neotrack.git
+cd neotrack
 ```
 
 ### 2. Install Dependencies
