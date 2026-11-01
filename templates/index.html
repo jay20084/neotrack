@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NeoTrack — Graph Database Courier Tracking Management System</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              900: '#312e81',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Vis.js Network CDN -->
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+  <style>
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.02); }
+    }
+    .stepper-active {
+      animation: pulse-subtle 2s infinite ease-in-out;
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(100, 116, 139, 0.5);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.8);
+    }
+    #vis-container {
+      background: radial-gradient(circle at center, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.95) 100%);
+    }
+    html:not(.dark) #vis-container {
+      background: radial-gradient(circle at center, rgba(241, 245, 249, 0.9) 0%, rgba(226, 232, 240, 0.95) 100%);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
+
+  <!-- ========================================================================= -->
+  <!-- TOP NOTIFICATION TOAST -->
+  <!-- ========================================================================= -->
+  <div id="toast" class="fixed top-5 right-5 z-50 transform transition-all duration-300 translate-y-[-120%] opacity-0 pointer-events-none flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border text-sm max-w-md"></div>
+
+  <!-- ========================================================================= -->
+  <!-- HEADER BAR -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 px-6 py-3.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+          <i data-lucide="network" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-bold text-lg text-white tracking-tight">NeoTrack</h1>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium">Graph Logistics</span>
+          </div>
+          <p class="text-xs text-slate-400">Next-Gen Courier Tracking with Neo4j & Cypher Traversals</p>
+        </div>
+      </div>
+
+      <div class="flex items-center flex-wrap gap-3">
+        <!-- DB Status Badge -->
+        <div id="db-badge" class="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-slate-800/80 border-slate-700 text-slate-300">
+          <span id="db-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span>
+          <span id="db-label">Checking Database...</span>
+        </div>
+
+        <!-- Insert New Shipment Button -->
+        <button onclick="openNewShipmentModal()" class="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 active:scale-95 transition-all text-white shadow-md shadow-emerald-600/30">
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+          <span>+ Insert New Shipment</span>
+        </button>
+
+        <!-- Reset Database Button -->
+        <button id="btn-reset" onclick="resetDatabase()" class="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 transition-all text-slate-200 hover:text-white shadow-sm" title="Clear all shipments and reset database to clean state">
+          <i data-lucide="rotate-ccw" class="w-4 h-4 text-rose-400"></i>
+          <span>Reset</span>
+        </button>
+
+        <!-- Dark/Light Mode Toggle -->
+        <button onclick="toggleTheme()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors" title="Toggle Dark/Light Mode">
+          <i data-lucide="sun-moon" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- MAIN CONTAINER -->
+  <!-- ========================================================================= -->
+  <div class="max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 flex-1 flex flex-col gap-6">
+
+    <!-- 1. TOP ANALYTICS CARDS (LIVE METRICS) -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      
+      <!-- Metric 1: Total Active Shipments -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm hover:border-slate-700 transition">
+        <div class="flex items-center justify-between text-slate-400 mb-2">
+          <span class="text-xs font-medium uppercase tracking-wider">Active Shipments</span>
+          <div class="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
+            <i data-lucide="boxes" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span id="metric-total-shipments" class="text-2xl font-bold text-white">0</span>
+          <span class="text-xs text-emerald-400 flex items-center font-medium">
+            <i data-lucide="trending-up" class="w-3 h-3 mr-0.5"></i>Live Graph
+          </span>
+        </div>
+        <p id="metric-total-detail" class="text-xs text-slate-400 mt-1">Overall Avg: 0.00 kg (0 total)</p>
+      </div>
+
+      <!-- Metric 2: FastTrack Avg Weight -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm hover:border-slate-700 transition">
+        <div class="flex items-center justify-between text-slate-400 mb-2">
+          <span class="text-xs font-medium uppercase tracking-wider">FastTrack Logistics</span>
+          <div class="p-2 bg-purple-500/10 text-purple-400 rounded-lg">
+            <i data-lucide="truck" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span id="metric-fasttrack-weight" class="text-2xl font-bold text-white">0.00</span>
+          <span class="text-xs text-slate-400 font-medium">kg avg</span>
+        </div>
+        <p id="metric-fasttrack-detail" class="text-xs text-slate-400 mt-1">0 packages • Chennai Hub</p>
+      </div>
+
+      <!-- Metric 3: Swift Parcel Avg Weight -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm hover:border-slate-700 transition">
+        <div class="flex items-center justify-between text-slate-400 mb-2">
+          <span class="text-xs font-medium uppercase tracking-wider">Swift Parcel Co</span>
+          <div class="p-2 bg-blue-500/10 text-blue-400 rounded-lg">
+            <i data-lucide="package" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span id="metric-swift-weight" class="text-2xl font-bold text-white">0.00</span>
+          <span class="text-xs text-slate-400 font-medium">kg avg</span>
+        </div>
+        <p id="metric-swift-detail" class="text-xs text-slate-400 mt-1">0 packages • Bangalore Hub</p>
+      </div>
+    </section>
+
+    <!-- 2. MAIN SPLIT VIEW (2 COLUMNS: TRACKER & GRAPH CANVAS) -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+      
+      <!-- LEFT COLUMN: SEARCH, STEPPER, METADATA & TIMELINE (5 COLS) -->
+      <div class="lg:col-span-5 flex flex-col gap-5">
+        
+        <!-- Search & Quick Selection Pills -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-semibold uppercase tracking-wider text-slate-400">Track Package by Product ID</label>
+            <span class="text-[11px] text-indigo-400 font-medium">Cypher Traversal</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <div class="relative flex-1">
+              <i data-lucide="search" class="w-4 h-4 absolute left-3 top-3 text-slate-500"></i>
+              <input id="search-product-id" type="number" placeholder="Enter Product ID to track" 
+                class="w-full pl-9 pr-3 py-2 text-sm bg-slate-800/80 border border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 text-white placeholder-slate-500" 
+                onkeydown="if(event.key==='Enter') searchProduct()" />
+            </div>
+            <button onclick="searchProduct()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-medium text-sm rounded-xl transition">
+              Track
+            </button>
+          </div>
+        </div>
+
+        <!-- Visual Progress Stepper -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Transit Progress Stepper</h3>
+            <span id="current-status-badge" class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Loading...</span>
+          </div>
+
+          <div class="relative flex items-center justify-between text-center">
+            <!-- Background connecting line -->
+            <div class="absolute left-6 right-6 top-4 h-0.5 bg-slate-800 -z-0"></div>
+            <div id="stepper-progress-line" class="absolute left-6 top-4 h-0.5 bg-indigo-500 -z-0 transition-all duration-500" style="width: 0%;"></div>
+
+            <!-- Step 1: Dispatched -->
+            <div class="step-item flex flex-col items-center relative z-10" data-step="1">
+              <div class="step-icon w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 transition-all">
+                <i data-lucide="package-check" class="w-4 h-4"></i>
+              </div>
+              <span class="text-[11px] font-medium text-slate-400 mt-2">Dispatched</span>
+            </div>
+
+            <!-- Step 2: Sorting Facility -->
+            <div class="step-item flex flex-col items-center relative z-10" data-step="2">
+              <div class="step-icon w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 transition-all">
+                <i data-lucide="building-2" class="w-4 h-4"></i>
+              </div>
+              <span class="text-[11px] font-medium text-slate-400 mt-2">Sorting</span>
+            </div>
+
+            <!-- Step 3: In Transit -->
+            <div class="step-item flex flex-col items-center relative z-10" data-step="3">
+              <div class="step-icon w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 transition-all">
+                <i data-lucide="truck" class="w-4 h-4"></i>
+              </div>
+              <span class="text-[11px] font-medium text-slate-400 mt-2">In Transit</span>
+            </div>
+
+            <!-- Step 4: Out for Delivery -->
+            <div class="step-item flex flex-col items-center relative z-10" data-step="4">
+              <div class="step-icon w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 transition-all">
+                <i data-lucide="navigation" class="w-4 h-4"></i>
+              </div>
+              <span class="text-[11px] font-medium text-slate-400 mt-2">Out for Delivery</span>
+            </div>
+
+            <!-- Step 5: Delivered -->
+            <div class="step-item flex flex-col items-center relative z-10" data-step="5">
+              <div class="step-icon w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 transition-all">
+                <i data-lucide="check-circle" class="w-4 h-4"></i>
+              </div>
+              <span class="text-[11px] font-medium text-slate-400 mt-2">Delivered</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Shipment Metadata Card -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div>
+              <span id="detail-product-name" class="font-bold text-white text-base">—</span>
+              <span id="detail-product-id" class="text-xs text-indigo-400 ml-1.5 font-mono">#—</span>
+            </div>
+            <span id="detail-category-badge" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-medium">Electronics</span>
+          </div>
+
+          <!-- Transit Route (Origin -> Destination) -->
+          <div class="grid grid-cols-2 gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-800">
+            <div>
+              <div class="text-[11px] font-medium text-emerald-400 flex items-center gap-1 mb-1">
+                <i data-lucide="map-pin" class="w-3 h-3"></i> Origin Address
+              </div>
+              <p id="detail-origin-city" class="text-sm font-semibold text-white">—</p>
+              <p id="detail-origin-full" class="text-xs text-slate-400 truncate">—</p>
+            </div>
+            <div class="border-l border-slate-700/60 pl-3">
+              <div class="text-[11px] font-medium text-teal-400 flex items-center gap-1 mb-1">
+                <i data-lucide="navigation-2" class="w-3 h-3"></i> Destination
+              </div>
+              <p id="detail-dest-city" class="text-sm font-semibold text-white">—</p>
+              <p id="detail-dest-full" class="text-xs text-slate-400 truncate">—</p>
+            </div>
+          </div>
+
+          <!-- Customer & Agent Information -->
+          <div class="grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <span class="text-slate-400 block mb-0.5">Customer</span>
+              <p id="detail-customer-name" class="font-medium text-slate-200">—</p>
+              <p id="detail-customer-phone" class="text-slate-400 font-mono text-[11px]">—</p>
+            </div>
+            <div>
+              <span class="text-slate-400 block mb-0.5">Assigned Agent</span>
+              <p id="detail-agent-name" class="font-medium text-amber-300">—</p>
+              <p id="detail-company-name" class="text-purple-300 text-[11px]">—</p>
+            </div>
+          </div>
+
+          <!-- Current Location & Expected Delivery -->
+          <div class="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+            <div>
+              <span class="text-slate-400 block">Current Location</span>
+              <span id="detail-current-loc" class="font-semibold text-indigo-400">—</span>
+            </div>
+            <div class="text-right">
+              <span class="text-slate-400 block">Expected Delivery</span>
+              <span id="detail-expected-del" class="font-semibold text-emerald-400">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chronological Tracking Events Timeline (PL/SQL Cursor Replacement) -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <i data-lucide="history" class="w-4 h-4 text-indigo-400"></i>
+              Tracking Events Timeline
+            </h3>
+            <span class="text-[10px] text-slate-400 font-mono">ORDER BY arrival_time</span>
+          </div>
+
+          <div id="timeline-container" class="space-y-4 pl-2 pr-1 max-h-56 overflow-y-auto">
+            <!-- Timeline items injected dynamically -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT COLUMN: INTERACTIVE VIS.JS GRAPH CANVAS (7 COLS) -->
+      <div class="lg:col-span-7 flex flex-col gap-4">
+        
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col flex-1">
+          
+          <!-- Graph Header & Toolbar -->
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div>
+              <h2 class="font-bold text-white text-base flex items-center gap-2">
+                <i data-lucide="share-2" class="w-4 h-4 text-indigo-400"></i>
+                Interactive Neo4j Subgraph Explorer
+              </h2>
+              <p class="text-xs text-slate-400">Direct visualization of nodes & directional relationships</p>
+            </div>
+
+            <!-- Graph Canvas Controls -->
+            <div class="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
+              <button onclick="fitGraph()" class="p-1.5 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white transition" title="Center & Fit Graph">
+                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="zoomIn()" class="p-1.5 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white transition" title="Zoom In">
+                <i data-lucide="zoom-in" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="zoomOut()" class="p-1.5 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white transition" title="Zoom Out">
+                <i data-lucide="zoom-out" class="w-3.5 h-3.5"></i>
+              </button>
+              <button id="btn-physics" onclick="togglePhysics()" class="px-2 py-1 text-xs font-medium rounded-lg bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/50 transition">
+                Physics: On
+              </button>
+            </div>
+          </div>
+
+          <!-- Color-Coded Node Legend -->
+          <div class="flex items-center flex-wrap gap-2.5 py-2 px-3 bg-slate-800/40 rounded-xl border border-slate-800 text-[11px] mb-3">
+            <span class="text-slate-400 font-semibold mr-1">Nodes:</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>Customer</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>Product</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>Address</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>Agent</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span>Company</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-teal-500"></span>Branch</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>Tracking</span>
+          </div>
+
+          <!-- The Vis.js Canvas Container -->
+          <div class="relative w-full rounded-xl overflow-hidden border border-slate-800 flex-1 min-h-[460px]" id="vis-container">
+            <div id="vis-network" class="w-full h-full min-h-[460px]"></div>
+
+            <!-- Loading overlay inside canvas -->
+            <div id="graph-loader" class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center hidden">
+              <div class="flex items-center gap-3 text-indigo-400 text-sm font-medium">
+                <i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i>
+                Rendering Graph Traversal...
+              </div>
+            </div>
+
+            <!-- Node Details Inspector Drawer -->
+            <div id="node-inspector" class="absolute bottom-3 left-3 right-3 sm:right-auto sm:max-w-xs bg-slate-900/95 border border-slate-700/80 p-3.5 rounded-xl shadow-xl backdrop-blur-md hidden transition">
+              <div class="flex items-center justify-between mb-1.5">
+                <span id="inspect-title" class="font-bold text-xs text-white">Node Details</span>
+                <button onclick="closeInspector()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+              </div>
+              <p id="inspect-body" class="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">—</p>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+    <!-- 3. BOTTOM SECTION: DISPATCHER STATUS UPDATE & MASTER SHIPMENTS TABLE -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Dispatcher Form: PL/SQL update_delivery_status procedure replacement (4 cols) -->
+      <div class="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+        <div class="border-b border-slate-800 pb-3">
+          <h2 class="font-bold text-white text-base flex items-center gap-2">
+            <i data-lucide="clipboard-pen" class="w-4 h-4 text-emerald-400"></i>
+            Update Delivery Status
+          </h2>
+        </div>
+
+        <form id="form-update-status" onsubmit="submitStatusUpdate(event)" class="space-y-3.5">
+          <!-- Product ID Input (Dynamically synchronized with all shipments) -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-medium text-slate-300">Product ID / Shipment</label>
+              <span class="text-[10px] text-emerald-400 font-medium">Live Synced</span>
+            </div>
+            <select id="form-product-id" onchange="selectProduct(this.value)" class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 text-white">
+              <!-- Dynamically populated from database records -->
+            </select>
+          </div>
+
+          <!-- New Location Input -->
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">New Location</label>
+            <input id="form-new-location" type="text" list="location-suggestions" required placeholder="e.g. Bangalore Sorting Hub"
+              class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 text-white placeholder-slate-500" />
+            <datalist id="location-suggestions">
+              <option value="Chennai Main Hub">
+              <option value="Bangalore Tech Hub">
+              <option value="Coimbatore Dispatch Center">
+              <option value="Chennai Sorting Center">
+              <option value="Out for Delivery">
+              <option value="Delivered">
+            </datalist>
+          </div>
+
+          <!-- Status Dropdown -->
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Status Event</label>
+            <select id="form-new-status" class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 text-white">
+              <option value="Dispatched to Facility">Dispatched to Facility</option>
+              <option value="Arrived at Sorting Facility">Arrived at Sorting Facility</option>
+              <option value="In Transit">In Transit</option>
+              <option value="Out for Delivery">Out for Delivery</option>
+              <option value="Delivered">Delivered</option>
+            </select>
+          </div>
+
+          <!-- Days to Add Input -->
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Days to Add to Expected Delivery</label>
+            <input id="form-days-to-add" type="number" value="1" min="-10" max="30" required
+              class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 text-white" />
+            <span class="text-[11px] text-slate-400 mt-1 block">0 = Today, &lt;0 = Delivered, &gt;0 = +X days</span>
+          </div>
+
+          <!-- Submit Button -->
+          <button type="submit" id="btn-submit-status" class="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 active:scale-95 font-semibold text-sm text-white rounded-xl transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2">
+            <i data-lucide="check-check" class="w-4 h-4"></i>
+            <span>Execute Cypher Status Update</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Master All Shipments Table: Replaces SQL 7-table JOIN (8 cols) -->
+      <div class="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h2 class="font-bold text-white text-base flex items-center gap-2">
+              <i data-lucide="table" class="w-4 h-4 text-indigo-400"></i>
+              All Active Shipments Master Table
+            </h2>
+            <p class="text-xs text-slate-400">Consolidating 7 legacy tables into seamless Cypher traversal</p>
+          </div>
+
+          <!-- Filter by Hub Dropdown & New Shipment Action -->
+          <div class="flex items-center gap-2.5">
+            <button onclick="openNewShipmentModal()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 rounded-lg font-semibold transition active:scale-95">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>New Shipment</span>
+            </button>
+            <span class="text-xs text-slate-400">Hub:</span>
+            <select id="select-hub-filter" onchange="filterShipmentsByHub()" class="px-3 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 font-medium">
+              <option value="All">All Hubs</option>
+              <option value="Chennai Main Hub">Chennai Main Hub</option>
+              <option value="Bangalore Tech Hub">Bangalore Tech Hub</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Responsive Table Container -->
+        <div class="overflow-x-auto rounded-xl border border-slate-800">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-800/70 text-slate-400 uppercase text-[10px] tracking-wider font-semibold border-b border-slate-800">
+              <tr>
+                <th class="py-3 px-3">Product</th>
+                <th class="py-3 px-3">Customer</th>
+                <th class="py-3 px-3">Origin &rarr; Destination</th>
+                <th class="py-3 px-3">Courier & Agent</th>
+                <th class="py-3 px-3">Current Location</th>
+                <th class="py-3 px-3">Expected</th>
+                <th class="py-3 px-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="shipments-tbody" class="divide-y divide-slate-800/60 font-normal">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: INSERT NEW SHIPMENT INTO GRAPH DATABASE -->
+  <!-- ========================================================================= -->
+  <div id="modal-new-shipment" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 flex flex-col gap-5">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-3">
+          <div class="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl">
+            <i data-lucide="package-plus" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="font-bold text-base text-white">Insert New Shipment Record</h2>
+            <p class="text-xs text-slate-400">Creates Nodes &amp; Relationships directly in the Graph Database</p>
+          </div>
+        </div>
+        <button onclick="closeNewShipmentModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="form-create-shipment" onsubmit="submitNewShipment(event)" class="space-y-4">
+        <!-- 1. Package Info -->
+        <div>
+          <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400 block mb-2">1. Parcel &amp; Product Details</span>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-medium text-slate-300 mb-1">Product Name *</label>
+              <input id="new-product-name" type="text" required placeholder="e.g. Mechanical Keyboard" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Product ID (Optional)</label>
+              <input id="new-product-id" type="number" placeholder="Auto-generated" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Category</label>
+              <select id="new-product-type" onchange="toggleCustomCategory(this.value)" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500">
+                <option value="Electronics">Electronics</option>
+                <option value="Food">Food / Perishables</option>
+                <option value="Paper">Paper</option>
+                <option value="Apparel">Apparel</option>
+                <option value="Healthcare">Healthcare</option>
+                <option value="Hardware">Hardware</option>
+                <option value="Custom">Custom Requirement / Other...</option>
+              </select>
+              <div id="new-custom-category-container" class="hidden mt-1.5">
+                <input id="new-custom-category" type="text" placeholder="Specify custom requirement (e.g. Frozen Foods, Documents)" class="w-full px-2.5 py-1.5 text-xs bg-slate-800 border border-indigo-500 rounded-lg text-white focus:outline-none focus:border-indigo-400 placeholder-slate-500" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Package Size</label>
+              <select id="new-product-size" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500">
+                <option value="Small">Small</option>
+                <option value="Medium" selected>Medium</option>
+                <option value="Large">Large</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Weight (kg) *</label>
+              <input id="new-product-weight" type="number" step="0.01" min="0.01" required value="1.20" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Customer & Carrier -->
+        <div class="pt-2 border-t border-slate-800">
+          <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400 block mb-2">2. Customer &amp; Courier Assignment</span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Customer Name *</label>
+              <input id="new-customer-name" type="text" required placeholder="e.g. Priya Sharma" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Customer Phone</label>
+              <input id="new-customer-phone" type="text" placeholder="e.g. 9840112233" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Courier Company</label>
+              <select id="new-company-id" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500">
+                <option value="1">FastTrack Logistics (Chennai Hub 101)</option>
+                <option value="2">Swift Parcel Co (Bangalore Hub 102)</option>
+              </select>
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-medium text-slate-300">Assigned Agent</label>
+                <span class="text-[10px] text-amber-400 font-medium">Typeable • Auto ID</span>
+              </div>
+              <input id="new-delivery-person-name" type="text" list="agent-suggestions" placeholder="Type or select agent from table..." class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+              <datalist id="agent-suggestions">
+                <!-- Dynamically populated ONLY with agent entities present in the table -->
+              </datalist>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Routing (Addresses) -->
+        <div class="pt-2 border-t border-slate-800">
+          <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400 block mb-2">3. Transit Routing (Origin &rarr; Destination)</span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="bg-slate-800/40 p-3 rounded-xl border border-slate-800 space-y-2">
+              <span class="text-[11px] font-semibold text-emerald-400 block">Origin Address (Sender)</span>
+              <div>
+                <label class="block text-[10px] text-slate-400 mb-0.5">City *</label>
+                <input id="new-origin-city" type="text" required value="Chennai" placeholder="e.g. Chennai" class="w-full px-2.5 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white" />
+              </div>
+              <div>
+                <label class="block text-[10px] text-slate-400 mb-0.5">Street &amp; House No.</label>
+                <input id="new-origin-street" type="text" value="Gandhi St, 4A" placeholder="Street &amp; House" class="w-full px-2.5 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white" />
+              </div>
+            </div>
+            <div class="bg-slate-800/40 p-3 rounded-xl border border-slate-800 space-y-2">
+              <span class="text-[11px] font-semibold text-teal-400 block">Destination Address (Receiver)</span>
+              <div>
+                <label class="block text-[10px] text-slate-400 mb-0.5">City *</label>
+                <input id="new-dest-city" type="text" required value="Bangalore" placeholder="e.g. Bangalore" class="w-full px-2.5 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white" />
+              </div>
+              <div>
+                <label class="block text-[10px] text-slate-400 mb-0.5">Street &amp; House No.</label>
+                <input id="new-dest-street" type="text" value="MG Road, 12B" placeholder="Street &amp; House" class="w-full px-2.5 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Initial Location & Expected Delivery -->
+        <div class="pt-2 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Current Location</label>
+            <input id="new-current-loc" type="text" value="Chennai Main Hub" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Expected Delivery</label>
+            <input id="new-expected-del" type="text" value="+2 days" class="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-white" />
+          </div>
+        </div>
+
+        <!-- Buttons -->
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+          <button type="button" onclick="closeNewShipmentModal()" class="px-4 py-2 text-xs font-medium rounded-xl text-slate-300 hover:bg-slate-800 transition">
+            Cancel
+          </button>
+          <button type="submit" id="btn-save-new-shipment" class="px-5 py-2 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white transition shadow-lg shadow-emerald-600/20 flex items-center gap-2">
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span>Save &amp; Insert into Graph</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- FOOTER -->
+  <!-- ========================================================================= -->
+  <footer class="border-t border-slate-800/80 bg-slate-900/50 py-4 px-6 text-center text-xs text-slate-400">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <span>NeoTrack &bull; Oracle SQL &amp; PL/SQL &rarr; Neo4j Graph Database Migration</span>
+      <span class="text-slate-400">FastAPI &bull; Cypher &bull; Vis.js Network &bull; Tailwind CSS</span>
+    </div>
+  </footer>
+
+  <!-- ========================================================================= -->
+  <!-- CLIENT JAVASCRIPT APPLICATION LOGIC -->
+  <!-- ========================================================================= -->
+  <script>
+    // State variables
+    let currentProductId = null;
+    let network = null;
+    let physicsEnabled = true;
+    let allShipmentsData = [];
+
+    // Format Expected Delivery: 0/Today reflects 'Today', negative reflects 'Delivered', positive reflects '+X days'
+    function formatExpectedDelivery(val) {
+      if (!val) return "Today";
+      const s = String(val).trim();
+      if (s.toLowerCase() === "today") return "Today";
+      if (s.toLowerCase() === "delivered") return "Delivered";
+      if (s.startsWith("-")) return "Delivered";
+      if (s === "0" || /^(\+|-)?0(\s*days?)?$/i.test(s)) {
+        return "Today";
+      }
+      const clean = s.replace(/days?/i, '').replace('+', '').trim();
+      const n = parseFloat(clean);
+      if (!isNaN(n)) {
+        if (n < 0) return "Delivered";
+        if (n === 0) return "Today";
+      }
+      return s;
+    }
+
+    // Initialize icons
+    document.addEventListener("DOMContentLoaded", () => {
+      lucide.createIcons();
+      checkConnectionStatus();
+      loadAnalytics();
+      loadAllShipments();
+    });
+
+    // Toast notification utility
+    function showToast(message, type = "success") {
+      const toast = document.getElementById("toast");
+      const colors = {
+        success: "bg-emerald-950 border-emerald-600 text-emerald-200",
+        error: "bg-rose-950 border-rose-600 text-rose-200",
+        info: "bg-indigo-950 border-indigo-600 text-indigo-200",
+      };
+      const icons = {
+        success: "check-circle-2",
+        error: "alert-circle",
+        info: "info"
+      };
+
+      toast.className = `fixed top-5 right-5 z-50 transform transition-all duration-300 translate-y-0 opacity-100 flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border text-sm max-w-md ${colors[type] || colors.info}`;
+      toast.innerHTML = `<i data-lucide="${icons[type] || 'info'}" class="w-5 h-5 flex-shrink-0"></i><span>${message}</span>`;
+      lucide.createIcons();
+
+      setTimeout(() => {
+        toast.classList.replace("translate-y-0", "translate-y-[-120%]");
+        toast.classList.replace("opacity-100", "opacity-0");
+      }, 4000);
+    }
+
+    // Theme toggler
+    function toggleTheme() {
+      const html = document.documentElement;
+      html.classList.toggle("dark");
+      if (network) network.redraw();
+    }
+
+    // Check backend and DB status
+    async function checkConnectionStatus() {
+      try {
+        const res = await fetch("/api/status/connection");
+        const data = await res.json();
+        const badge = document.getElementById("db-badge");
+        const dot = document.getElementById("db-dot");
+        const label = document.getElementById("db-label");
+
+        if (data.connected) {
+          badge.className = "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-emerald-500/10 border-emerald-500/30 text-emerald-400";
+          dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500";
+          label.textContent = "Neo4j Connected (Live DB)";
+        } else {
+          badge.className = "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-amber-500/10 border-amber-500/30 text-amber-400";
+          dot.className = "w-2.5 h-2.5 rounded-full bg-amber-400";
+          label.textContent = "Mock Graph Engine (Active)";
+        }
+      } catch (err) {
+        document.getElementById("db-label").textContent = "API Offline";
+      }
+    }
+
+    // Database Reset Trigger (Wipes all records clean)
+    async function resetDatabase() {
+      const btn = document.getElementById("btn-reset");
+      const originalHTML = btn.innerHTML;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Resetting...</span>`;
+      lucide.createIcons();
+
+      try {
+        const res = await fetch("/api/clear", { method: "POST" });
+        const data = await res.json();
+        showToast(data.message || "Database reset clean (0 records).", "success");
+        currentProductId = null;
+        checkConnectionStatus();
+        loadAnalytics();
+        loadAllShipments();
+        loadProductTracking(null);
+      } catch (err) {
+        showToast("Failed to reset database: " + err.message, "error");
+      } finally {
+        btn.innerHTML = originalHTML;
+        lucide.createIcons();
+      }
+    }
+
+    // Load Analytics (Strictly computed from inserted database records)
+    async function loadAnalytics() {
+      try {
+        const res = await fetch("/api/analytics");
+        const data = await res.json();
+
+        const totalShipments = data.total_active_shipments || 0;
+        const overallAvg = data.overall_avg_weight !== undefined ? Number(data.overall_avg_weight).toFixed(2) : "0.00";
+
+        document.getElementById("metric-total-shipments").textContent = totalShipments;
+        const totalDetail = document.getElementById("metric-total-detail");
+        if (totalDetail) {
+          totalDetail.textContent = `Overall Avg: ${overallAvg} kg (${totalShipments} total)`;
+        }
+
+        const companies = Array.isArray(data.companies) ? data.companies : [];
+        const fasttrack = companies.find(c => (c.company_id === 1) || (c.company_name && String(c.company_name).toLowerCase().includes("fasttrack")));
+        const swift = companies.find(c => (c.company_id === 2) || (c.company_name && String(c.company_name).toLowerCase().includes("swift")));
+
+        document.getElementById("metric-fasttrack-weight").textContent = fasttrack ? Number(fasttrack.avg_weight || 0).toFixed(2) : "0.00";
+        const ftDetail = document.getElementById("metric-fasttrack-detail");
+        if (ftDetail) {
+          const count = fasttrack ? (fasttrack.package_count || 0) : 0;
+          ftDetail.textContent = `${count} package(s) • Chennai Hub`;
+        }
+
+        document.getElementById("metric-swift-weight").textContent = swift ? Number(swift.avg_weight || 0).toFixed(2) : "0.00";
+        const swDetail = document.getElementById("metric-swift-detail");
+        if (swDetail) {
+          const count = swift ? (swift.package_count || 0) : 0;
+          swDetail.textContent = `${count} package(s) • Bangalore Hub`;
+        }
+      } catch (e) {
+        console.error("Analytics error:", e);
+      }
+    }
+
+    // Load All Active Shipments Table
+    async function loadAllShipments() {
+      try {
+        const res = await fetch("/api/shipments");
+        allShipmentsData = await res.json();
+        renderShipmentsTable(allShipmentsData);
+        updateProductDropdown(allShipmentsData);
+        updateAgentSuggestions(allShipmentsData);
+
+        if (allShipmentsData && allShipmentsData.length > 0) {
+          if (!currentProductId || !allShipmentsData.some(s => s.product_id == currentProductId)) {
+            selectProduct(allShipmentsData[0].product_id);
+          }
+        } else {
+          currentProductId = null;
+          loadProductTracking(null);
+        }
+      } catch (err) {
+        console.error("Shipments table load error:", err);
+      }
+    }
+
+    // Populate Assigned Agent suggestions ONLY from entities present in the table
+    function updateAgentSuggestions(shipments) {
+      const datalist = document.getElementById("agent-suggestions");
+      if (!datalist) return;
+      datalist.innerHTML = "";
+
+      if (!shipments || shipments.length === 0) return;
+
+      const agentMap = new Map();
+      shipments.forEach(s => {
+        if (s.delivery_person && s.delivery_person !== "Unassigned" && s.delivery_person.trim() !== "") {
+          const name = s.delivery_person.trim();
+          if (!agentMap.has(name)) {
+            agentMap.set(name, s.delivery_person_id || null);
+          }
+        }
+      });
+
+      agentMap.forEach((id, name) => {
+        const opt = document.createElement("option");
+        opt.value = name;
+        if (id) {
+          opt.label = `Agent #${id}`;
+        }
+        datalist.appendChild(opt);
+      });
+    }
+
+    // Populate the Update Status dropdown dynamically with all live database shipments
+    function updateProductDropdown(shipments) {
+      const select = document.getElementById("form-product-id");
+      if (!select || !shipments) return;
+
+      const currentVal = select.value || currentProductId;
+      select.innerHTML = "";
+
+      shipments.forEach(s => {
+        const opt = document.createElement("option");
+        opt.value = s.product_id;
+        opt.textContent = `${s.product_id} — ${s.product_name} (${s.product_type || 'General'})`;
+        select.appendChild(opt);
+      });
+
+      if (currentVal && shipments.some(s => s.product_id == currentVal)) {
+        select.value = currentVal;
+      } else if (shipments.length > 0) {
+        select.value = shipments[0].product_id;
+      }
+    }
+
+    // Filter shipments by hub
+    async function filterShipmentsByHub() {
+      const hub = document.getElementById("select-hub-filter").value;
+      if (hub === "All") {
+        renderShipmentsTable(allShipmentsData);
+      } else {
+        try {
+          const res = await fetch(`/api/hub-products/${encodeURIComponent(hub)}`);
+          const hubProducts = await res.json();
+          renderShipmentsTable(hubProducts);
+        } catch (err) {
+          showToast("Error filtering by hub: " + err.message, "error");
+        }
+      }
+    }
+
+    // Render table rows
+    function renderShipmentsTable(rows) {
+      const tbody = document.getElementById("shipments-tbody");
+      tbody.innerHTML = "";
+
+      if (!rows || rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-500">
+          <div class="flex flex-col items-center justify-center gap-2">
+            <i data-lucide="package-search" class="w-8 h-8 text-slate-600"></i>
+            <span class="text-sm font-medium text-slate-400">No shipments found in database</span>
+            <span class="text-xs text-slate-500">Click <strong class="text-emerald-400">+ Insert New Shipment</strong> above to create your first record!</span>
+          </div>
+        </td></tr>`;
+        lucide.createIcons();
+        return;
+      }
+
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-800/40 transition group cursor-pointer";
+        tr.onclick = (e) => {
+          if (!e.target.closest("button")) {
+            selectProduct(r.product_id);
+          }
+        };
+
+        tr.innerHTML = `
+          <td class="py-3 px-3">
+            <div class="font-semibold text-white group-hover:text-indigo-400 transition">${r.product_name}</div>
+            <div class="text-[11px] text-slate-400 font-mono">#${r.product_id} • ${r.weight}kg</div>
+          </td>
+          <td class="py-3 px-3">
+            <div class="text-slate-200 font-medium">${r.customer_name || '—'}</div>
+            <div class="text-[11px] text-slate-400">${r.customer_phone || ''}</div>
+          </td>
+          <td class="py-3 px-3">
+            <div class="text-slate-200">${r.sender_city} &rarr; ${r.receiver_city}</div>
+            <div class="text-[11px] text-slate-400 truncate max-w-xs">${r.sender_address || ''}</div>
+          </td>
+          <td class="py-3 px-3">
+            <div class="text-amber-300 font-medium">${r.delivery_person}</div>
+            <div class="text-[11px] text-purple-300">${r.company_name}</div>
+          </td>
+          <td class="py-3 px-3 font-medium text-slate-300">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-xs">
+              <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>${r.current_location || r.location}
+            </span>
+          </td>
+          <td class="py-3 px-3 font-semibold ${formatExpectedDelivery(r.expected_delivery) === 'Delivered' ? 'text-emerald-400' : (formatExpectedDelivery(r.expected_delivery) === 'Today' ? 'text-amber-400' : 'text-indigo-400')}">
+            ${formatExpectedDelivery(r.expected_delivery)}
+          </td>
+          <td class="py-3 px-3 text-right">
+            <button onclick="selectProduct(${r.product_id})" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white transition border border-indigo-500/30">
+              Track Subgraph
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      lucide.createIcons();
+    }
+
+    // Quick selection
+    function selectProduct(pid) {
+      currentProductId = parseInt(pid);
+      document.getElementById("search-product-id").value = currentProductId;
+      const select = document.getElementById("form-product-id");
+      if (select && select.querySelector(`option[value="${currentProductId}"]`)) {
+        select.value = currentProductId;
+      }
+      loadProductTracking(currentProductId);
+    }
+
+    function searchProduct() {
+      const pid = parseInt(document.getElementById("search-product-id").value);
+      if (!pid) {
+        showToast("Please enter a valid numeric Product ID", "error");
+        return;
+      }
+      selectProduct(pid);
+    }
+
+    // Load full tracking details and render subgraph
+    async function loadProductTracking(productId) {
+      const loader = document.getElementById("graph-loader");
+
+      if (!productId) {
+        document.getElementById("detail-product-name").textContent = "No Shipment Selected";
+        document.getElementById("detail-product-id").textContent = "";
+        document.getElementById("detail-category-badge").textContent = "None";
+        document.getElementById("detail-origin-city").textContent = "—";
+        document.getElementById("detail-origin-full").textContent = "—";
+        document.getElementById("detail-dest-city").textContent = "—";
+        document.getElementById("detail-dest-full").textContent = "—";
+        document.getElementById("detail-customer-name").textContent = "—";
+        document.getElementById("detail-customer-phone").textContent = "—";
+        document.getElementById("detail-agent-name").textContent = "—";
+        document.getElementById("detail-company-name").textContent = "—";
+        document.getElementById("detail-current-loc").textContent = "—";
+        document.getElementById("detail-expected-del").textContent = "—";
+        document.getElementById("current-status-badge").textContent = "No Records";
+        updateProgressStepper("", []);
+        renderTimeline([]);
+        if (network) {
+          network.setData({ nodes: new vis.DataSet([]), edges: new vis.DataSet([]) });
+        }
+        loader.classList.add("hidden");
+        return;
+      }
+
+      loader.classList.remove("hidden");
+
+      try {
+        const res = await fetch(`/api/track/${productId}`);
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Product not found.");
+        }
+        const data = await res.json();
+        
+        // 1. Populate Metadata
+        const p = data.product;
+        document.getElementById("detail-product-name").textContent = p.product_name;
+        document.getElementById("detail-product-id").textContent = `#${p.product_id}`;
+        document.getElementById("detail-category-badge").textContent = `${p.product_type} (${p.weight}kg)`;
+        
+        if (data.origin) {
+          document.getElementById("detail-origin-city").textContent = data.origin.city || "Chennai";
+          document.getElementById("detail-origin-full").textContent = `${data.origin.house_no}, ${data.origin.street}`;
+        }
+        if (data.dest) {
+          document.getElementById("detail-dest-city").textContent = data.dest.city || "Bangalore";
+          document.getElementById("detail-dest-full").textContent = `${data.dest.house_no}, ${data.dest.street}`;
+        }
+
+        document.getElementById("detail-customer-name").textContent = data.customer ? data.customer.name : "—";
+        document.getElementById("detail-customer-phone").textContent = data.customer ? data.customer.phone_no : "—";
+        document.getElementById("detail-agent-name").textContent = data.delivery_person ? data.delivery_person.name : "Unassigned";
+        document.getElementById("detail-company-name").textContent = data.company ? data.company.name : "—";
+        document.getElementById("detail-current-loc").textContent = p.current_location;
+        document.getElementById("detail-expected-del").textContent = formatExpectedDelivery(p.expected_delivery);
+
+        // 2. Update Progress Stepper
+        updateProgressStepper(p.current_location, data.tracking_events, p.expected_delivery);
+
+        // 3. Render Timeline
+        renderTimeline(data.tracking_events);
+
+        // 4. Render Vis.js Graph
+        renderVisNetwork(data.graph_data);
+
+      } catch (err) {
+        showToast(err.message, "error");
+      } finally {
+        loader.classList.add("hidden");
+      }
+    }
+
+    // Update Progress Stepper
+    function updateProgressStepper(currentLocation, events = [], expectedDelivery = "") {
+      const statusBadge = document.getElementById("current-status-badge");
+      const progressLine = document.getElementById("stepper-progress-line");
+      const stepItems = document.querySelectorAll(".step-item");
+
+      if (!currentLocation) {
+        statusBadge.textContent = "No Records";
+        statusBadge.className = "px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700";
+        progressLine.style.width = "0%";
+        progressLine.className = "absolute left-6 top-4 h-0.5 bg-slate-800 -z-0 transition-all duration-500";
+        stepItems.forEach(item => {
+          const iconDiv = item.querySelector(".step-icon");
+          const label = item.querySelector("span");
+          iconDiv.className = "step-icon w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-xs font-bold text-slate-500";
+          label.className = "text-[11px] font-medium text-slate-500 mt-2";
+        });
+        return;
+      }
+
+      statusBadge.textContent = currentLocation;
+
+      // Determine step 1 to 5
+      let stepIndex = 1;
+      const loc = String(currentLocation).toLowerCase();
+      const latestEvent = events.length > 0 ? String(events[events.length - 1].arrival_status || "").toLowerCase() : "";
+      const expDel = String(expectedDelivery || "").toLowerCase();
+
+      if (loc.includes("delivered") || latestEvent.includes("delivered") || expDel === "delivered") {
+        stepIndex = 5;
+      } else if (loc.includes("out for delivery") || latestEvent.includes("out for delivery")) {
+        stepIndex = 4;
+      } else if (loc.includes("transit") || latestEvent.includes("transit")) {
+        stepIndex = 3;
+      } else if (loc.includes("sorting") || latestEvent.includes("sorting") || loc.includes("facility")) {
+        stepIndex = 2;
+      } else {
+        stepIndex = 1;
+      }
+
+      const isDelivered = (stepIndex === 5);
+
+      // Badge styling
+      if (isDelivered) {
+        statusBadge.className = "px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+      } else {
+        statusBadge.className = "px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30";
+      }
+
+      // Progress Line
+      const linePercentage = ((stepIndex - 1) / 4) * 100;
+      progressLine.style.width = `${linePercentage}%`;
+      if (isDelivered) {
+        progressLine.className = "absolute left-6 top-4 h-0.5 bg-emerald-500 -z-0 transition-all duration-500 shadow-sm shadow-emerald-500/50";
+      } else {
+        progressLine.className = "absolute left-6 top-4 h-0.5 bg-indigo-500 -z-0 transition-all duration-500";
+      }
+
+      // Update UI Stepper icons and labels
+      stepItems.forEach(item => {
+        const step = parseInt(item.getAttribute("data-step"));
+        const iconDiv = item.querySelector(".step-icon");
+        const label = item.querySelector("span");
+
+        if (step < stepIndex) {
+          // Completed prior steps: emerald green
+          iconDiv.className = "step-icon w-8 h-8 rounded-full bg-emerald-500 border-2 border-emerald-400 flex items-center justify-center text-xs font-bold text-white shadow-sm shadow-emerald-500/30";
+          label.className = "text-[11px] font-semibold text-emerald-400 mt-2";
+        } else if (step === stepIndex) {
+          // Current Active Step
+          if (isDelivered) {
+            // When delivered, the delivered circle turns GREEN!
+            iconDiv.className = "step-icon w-8 h-8 rounded-full bg-emerald-500 border-2 border-emerald-300 flex items-center justify-center text-xs font-bold text-white ring-4 ring-emerald-500/30 shadow-lg shadow-emerald-500/50 stepper-active";
+            label.className = "text-[11px] font-bold text-emerald-400 mt-2";
+          } else {
+            // In-transit active step: indigo
+            iconDiv.className = "step-icon w-8 h-8 rounded-full bg-indigo-600 border-2 border-indigo-400 flex items-center justify-center text-xs font-bold text-white ring-4 ring-indigo-500/30 stepper-active";
+            label.className = "text-[11px] font-bold text-indigo-300 mt-2";
+          }
+        } else {
+          // Future steps: slate
+          iconDiv.className = "step-icon w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-xs font-bold text-slate-500";
+          label.className = "text-[11px] font-medium text-slate-500 mt-2";
+        }
+      });
+      lucide.createIcons();
+    }
+
+    // Render Timeline
+    function renderTimeline(events) {
+      const container = document.getElementById("timeline-container");
+      container.innerHTML = "";
+
+      if (!events || events.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-500 py-3 text-center">No tracking logs recorded yet.</p>`;
+        return;
+      }
+
+      events.forEach((ev, i) => {
+        const isLatest = i === events.length - 1;
+        const item = document.createElement("div");
+        item.className = "relative flex items-start gap-3 pl-2";
+
+        item.innerHTML = `
+          <!-- Dot & Line -->
+          <div class="relative flex flex-col items-center">
+            <span class="w-3 h-3 rounded-full ${isLatest ? 'bg-rose-500 ring-4 ring-rose-500/20 animate-pulse' : 'bg-slate-700'}"></span>
+            ${!isLatest ? '<span class="w-0.5 h-7 bg-slate-800 my-0.5"></span>' : ''}
+          </div>
+          <!-- Content -->
+          <div class="flex-1 -mt-0.5 pb-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold ${isLatest ? 'text-rose-400' : 'text-slate-300'}">${ev.arrival_status}</span>
+              <span class="text-[10px] text-slate-400 font-mono">${ev.arrival_time}</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-0.5">Tracking Event Log #${ev.tracking_id}</p>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    // Render Vis.js Interactive Graph
+    function renderVisNetwork(graphData) {
+      const container = document.getElementById("vis-network");
+      
+      const nodes = new vis.DataSet(graphData.nodes);
+      const edges = new vis.DataSet(graphData.edges);
+
+      const data = { nodes, edges };
+      const options = {
+        nodes: {
+          shape: "box",
+          margin: 10,
+          borderWidth: 2,
+          borderWidthSelected: 3,
+          font: { face: "sans-serif", size: 12 },
+          shadow: { enabled: true, color: "rgba(0,0,0,0.5)", size: 8 }
+        },
+        edges: {
+          width: 2,
+          selectionWidth: 3,
+          arrows: { to: { enabled: true, scaleFactor: 0.8 } },
+          smooth: { enabled: true, type: "cubicBezier", roundness: 0.2 }
+        },
+        physics: {
+          enabled: physicsEnabled,
+          solver: "forceAtlas2Based",
+          forceAtlas2Based: {
+            gravitationalConstant: -45,
+            centralGravity: 0.015,
+            springLength: 90,
+            springConstant: 0.08,
+            damping: 0.4
+          },
+          stabilization: { iterations: 120 }
+        },
+        interaction: {
+          hover: true,
+          tooltipDelay: 100,
+          zoomView: true,
+          dragView: true
+        }
+      };
+
+      if (network) {
+        network.destroy();
+      }
+
+      network = new vis.Network(container, data, options);
+
+      // Node click inspection
+      network.on("click", function(params) {
+        if (params.nodes.length > 0) {
+          const selectedNodeId = params.nodes[0];
+          const nodeObj = nodes.get(selectedNodeId);
+          openInspector(nodeObj);
+        } else {
+          closeInspector();
+        }
+      });
+    }
+
+    // Node inspector drawer
+    function openInspector(node) {
+      const drawer = document.getElementById("node-inspector");
+      document.getElementById("inspect-title").textContent = `Node: ${node.group}`;
+      document.getElementById("inspect-body").textContent = node.title || node.label;
+      drawer.classList.remove("hidden");
+    }
+
+    function closeInspector() {
+      document.getElementById("node-inspector").classList.add("hidden");
+    }
+
+    // Graph toolbar controls
+    function fitGraph() {
+      if (network) network.fit({ animation: { duration: 600, easingFunction: "easeInOutQuad" } });
+    }
+
+    function zoomIn() {
+      if (network) {
+        const scale = network.getScale();
+        network.moveTo({ scale: scale * 1.25, animation: true });
+      }
+    }
+
+    function zoomOut() {
+      if (network) {
+        const scale = network.getScale();
+        network.moveTo({ scale: scale * 0.8, animation: true });
+      }
+    }
+
+    function togglePhysics() {
+      physicsEnabled = !physicsEnabled;
+      const btn = document.getElementById("btn-physics");
+      btn.textContent = `Physics: ${physicsEnabled ? 'On' : 'Off'}`;
+      btn.className = physicsEnabled 
+        ? "px-2 py-1 text-xs font-medium rounded-lg bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/50 transition"
+        : "px-2 py-1 text-xs font-medium rounded-lg bg-slate-700 text-slate-400 hover:bg-slate-600 transition";
+      if (network) network.setOptions({ physics: { enabled: physicsEnabled } });
+    }
+
+    // Submit Delivery Status Update (PL/SQL Stored Procedure replacement)
+    async function submitStatusUpdate(event) {
+      event.preventDefault();
+      const btn = document.getElementById("btn-submit-status");
+      const originalHTML = btn.innerHTML;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Executing Cypher...</span>`;
+      lucide.createIcons();
+
+      const payload = {
+        product_id: parseInt(document.getElementById("form-product-id").value),
+        new_location: document.getElementById("form-new-location").value,
+        new_status: document.getElementById("form-new-status").value,
+        days_to_add: parseInt(document.getElementById("form-days-to-add").value || 0)
+      };
+
+      try {
+        const res = await fetch("/api/status/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || "Failed to update status.");
+        }
+
+        showToast(data.message || "Status updated successfully!", "success");
+
+        // Reload data without full page refresh
+        loadProductTracking(payload.product_id);
+        loadAllShipments();
+        loadAnalytics();
+
+        // Reset location field
+        document.getElementById("form-new-location").value = "";
+
+      } catch (err) {
+        showToast(err.message, "error");
+      } finally {
+        btn.innerHTML = originalHTML;
+        lucide.createIcons();
+      }
+    }
+
+    // Modal controls for Inserting New Shipment
+    function openNewShipmentModal() {
+      updateAgentSuggestions(allShipmentsData);
+      document.getElementById("modal-new-shipment").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    function closeNewShipmentModal() {
+      document.getElementById("modal-new-shipment").classList.add("hidden");
+    }
+
+    function toggleCustomCategory(val) {
+      const container = document.getElementById("new-custom-category-container");
+      const input = document.getElementById("new-custom-category");
+      if (val === "Custom") {
+        container.classList.remove("hidden");
+        input.focus();
+      } else {
+        container.classList.add("hidden");
+      }
+    }
+
+    async function submitNewShipment(event) {
+      event.preventDefault();
+      const btn = document.getElementById("btn-save-new-shipment");
+      const originalHTML = btn.innerHTML;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Inserting to Graph...</span>`;
+      lucide.createIcons();
+
+      const rawPid = document.getElementById("new-product-id").value;
+      const categorySelect = document.getElementById("new-product-type").value;
+      let finalCategory = categorySelect;
+      if (categorySelect === "Custom") {
+        const customVal = document.getElementById("new-custom-category").value.trim();
+        finalCategory = customVal || "Custom Requirement";
+      }
+
+      const agentInput = document.getElementById("new-delivery-person-name").value.trim();
+      let matchedAgentId = null;
+      if (agentInput && allShipmentsData && allShipmentsData.length > 0) {
+        const found = allShipmentsData.find(s => s.delivery_person && s.delivery_person.trim().toLowerCase() === agentInput.toLowerCase());
+        if (found && found.delivery_person_id) {
+          matchedAgentId = found.delivery_person_id;
+        }
+      }
+
+      const payload = {
+        product_id: rawPid ? parseInt(rawPid) : null,
+        product_name: document.getElementById("new-product-name").value.trim(),
+        product_type: finalCategory,
+        product_size: document.getElementById("new-product-size").value,
+        weight: parseFloat(document.getElementById("new-product-weight").value || 1.0),
+        customer_name: document.getElementById("new-customer-name").value.trim(),
+        customer_phone: document.getElementById("new-customer-phone").value.trim(),
+        company_id: parseInt(document.getElementById("new-company-id").value),
+        delivery_person_name: agentInput || null,
+        delivery_person_id: matchedAgentId,
+        origin_city: document.getElementById("new-origin-city").value.trim(),
+        origin_street: document.getElementById("new-origin-street").value.trim(),
+        dest_city: document.getElementById("new-dest-city").value.trim(),
+        dest_street: document.getElementById("new-dest-street").value.trim(),
+        current_location: document.getElementById("new-current-loc").value.trim(),
+        expected_delivery: formatExpectedDelivery(document.getElementById("new-expected-del").value.trim()),
+        initial_status: "Dispatched to Facility"
+      };
+
+      try {
+        const res = await fetch("/api/shipment/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || "Failed to insert new shipment.");
+        }
+
+        showToast(data.message || "New shipment inserted into Graph DB!", "success");
+        closeNewShipmentModal();
+        document.getElementById("form-create-shipment").reset();
+
+        // Refresh all tables, analytics, and auto-load the newly created shipment
+        const newPid = data.product_id;
+        await loadAllShipments();
+        await loadAnalytics();
+        selectProduct(newPid);
+
+      } catch (err) {
+        showToast(err.message, "error");
+      } finally {
+        btn.innerHTML = originalHTML;
+        lucide.createIcons();
+      }
+    }
+  </script>
+</body>
+</html>
